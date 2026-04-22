@@ -143,7 +143,14 @@ def generate_arrangement_pdf(report_df: pd.DataFrame, selected_day: str, date_va
 
     elems = []
 
-    # header
+    # ── logo + header ─────────────────────────────────────────────────────────
+    from reportlab.platypus import Image as RLImage
+    LOGO_PATH = os.path.join(os.getcwd(), "2025021137.png")
+    if os.path.exists(LOGO_PATH):
+        logo = RLImage(LOGO_PATH, width=3.8*cm, height=1.6*cm)
+        logo.hAlign = "CENTER"
+        elems.append(logo)
+        elems.append(Spacer(1, 0.2*cm))
     elems.append(Paragraph("PM SHRI KENDRIYA VIDYALAYA BURHANPUR", sty_school))
     elems.append(Paragraph("DAILY TEACHER ARRANGEMENT", sty_title))
     elems.append(Paragraph(f"{selected_day}  ·  {date_val}  ·  Academic Year 2026-27", sty_meta))

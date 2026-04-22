@@ -44,7 +44,7 @@ def parse_timetable(excel_path: str) -> pd.DataFrame:
                 cls = clean(class_row[col_idx])
                 subj = clean(subj_row[col_idx])
 
-                if cls or subj:
+                if cls and subj:  # both must be present — periods with only a class or only a subject are timetable artifacts (e.g. sport/computer coach rows)
                     records.append(
                         {
                             "Teacher_Name": current_teacher,

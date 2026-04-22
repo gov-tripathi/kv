@@ -1,0 +1,5 @@
+# Do NOT commit sensitive or local-only files
+arrangements_log.csv
+__pycache__/
+*.pyc
+.DS_Store

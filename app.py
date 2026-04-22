@@ -776,22 +776,22 @@ with tab_arr:
                     free_teachers,
                     key=lambda t: master_load(df, t, selected_day) + sub_wl.get(t, 0),
                 )
-                # Guard: if stored value is no longer a valid option, reset it
+                # Ensure stored raw name is still a valid option
                 if current_sub not in opts:
                     st.session_state[k_sub] = "— Not Assigned —"
                     current_sub = "— Not Assigned —"
                 col_sel, col_club = st.columns([3, 1])
                 with col_sel:
-                    # Store raw name as key — format_func handles display only
+                    # key=k_sub stores raw teacher name — format_func renders display label
                     # This survives reruns even when workload counts change
-                    _swl = sub_wl  # capture for format_func closure
+                    _swl = dict(sub_wl)  # snapshot so format_func closure stays stable
                     st.selectbox(
                         f"sub_{teacher}_{period}_sel",
                         options=opts,
                         key=k_sub,
-                        format_func=lambda o: (
+                        format_func=lambda o, swl=_swl: (
                             "— Not Assigned —" if o == "— Not Assigned —"
-                            else f"{short_name(o)}  [{master_load(df, o, selected_day) + _swl.get(o, 0)} periods today]"
+                            else f"{short_name(o)}  [{master_load(df, o, selected_day) + swl.get(o, 0)} periods today]"
                         ),
                         label_visibility="collapsed",
                     )
@@ -801,20 +801,24 @@ with tab_arr:
                         st.session_state[k_sub]  = "— Not Assigned —"
                         st.rerun()
             else:
+                # Club mode — display strings are stable (no workload counts)
+                # so we use a separate display key and sync to k_sub manually
                 c_opts = ["— Not Assigned —"] + sorted(club_teachers)
-                if current_sub not in c_opts:
-                    st.session_state[k_sub] = "— Not Assigned —"
-                    current_sub = "— Not Assigned —"
-                _cl = _club_label  # capture for format_func closure
+                c_disp = [o if o == "— Not Assigned —" else _club_label(o) for o in c_opts]
+                sel_idx_c = c_opts.index(current_sub) if current_sub in c_opts else 0
                 col_csel, col_back = st.columns([3, 1])
                 with col_csel:
-                    st.selectbox(
+                    chosen_cd = st.selectbox(
                         f"club_{teacher}_{period}_sel",
-                        options=c_opts,
-                        key=k_sub,
-                        format_func=lambda o: "— Not Assigned —" if o == "— Not Assigned —" else _cl(o),
+                        options=c_disp, index=sel_idx_c,
+                        key=f"clubdisp_{teacher}_{period}",
                         label_visibility="collapsed",
                     )
+                    # Map display string back to raw name safely
+                    chosen_c = c_opts[c_disp.index(chosen_cd)] if chosen_cd in c_disp else "— Not Assigned —"
+                    if chosen_c != current_sub:
+                        st.session_state[k_sub] = chosen_c
+                        st.rerun()
                 with col_back:
                     if st.button("↩ Back", key=f"backbtn_{teacher}_{period}", use_container_width=True):
                         st.session_state[k_club] = False
@@ -836,8 +840,8 @@ with tab_arr:
         else:
             rows = []
             for e in absent_periods:
-                sub  = st.session_state[f"sub_{e['teacher']}_{e['period']}"]
-                club = st.session_state[f"club_{e['teacher']}_{e['period']}"]
+                sub  = st.session_state.get(f"sub_{e['teacher']}_{e['period']}", "— Not Assigned —")
+                club = st.session_state.get(f"club_{e['teacher']}_{e['period']}", False)
                 tc, ts = teacher_period_info(df, sub, selected_day, e["period"]) if club else ("","")
                 rows.append({"Date": str(date_val), "Day": selected_day,
                              "Period": e["period"], "Absent_Teacher": e["teacher"],

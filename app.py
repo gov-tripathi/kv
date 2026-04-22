@@ -543,6 +543,7 @@ all_teachers = sorted(df["Teacher_Name"].unique())
 # ─────────────────────────────────────────────────────────────────────────────
 # Header
 # ─────────────────────────────────────────────────────────────────────────────
+@st.cache_data
 def _b64_img(filename: str) -> str:
     path = os.path.join(os.getcwd(), filename)
     try:
@@ -574,12 +575,14 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.markdown('<p class="card-label">Morning Setup</p>', unsafe_allow_html=True)
 today_day    = DAY_MAP.get(datetime.date.today().weekday(), "MON")
 c1, c2       = st.columns(2)
-selected_day = c1.selectbox("Day", DAYS_ORDER, index=DAYS_ORDER.index(today_day))
-date_val     = c2.date_input("Date", value=datetime.date.today())
+selected_day = c1.selectbox("Day", DAYS_ORDER, index=DAYS_ORDER.index(today_day),
+                            key="selected_day")
+date_val     = c2.date_input("Date", value=datetime.date.today(), key="date_val")
 absent_teachers = st.multiselect(
     "Mark Teachers as Absent",
     options=all_teachers,
     placeholder="Search and select absent teachers…",
+    key="absent_teachers",
 )
 st.markdown("</div>", unsafe_allow_html=True)
 
@@ -603,6 +606,123 @@ for e in absent_periods:
 # Tabs
 # ─────────────────────────────────────────────────────────────────────────────
 tab_arr, tab_status = st.tabs(["📋  Arrangement", "👥  Teacher Status"])
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  TAB 2 — Teacher Status (rendered first in code so that st.stop() calls
+#  inside TAB 1 cannot prevent Tab 2 content from being committed)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_status:
+    present_teachers = [t for t in all_teachers if t not in absent_teachers]
+
+    teacher_data: list[dict] = []
+    for t in present_teachers:
+        master_ps: set[int] = set(
+            df[(df["Teacher_Name"]==t) & (df["Day"]==selected_day)]["Period"].astype(int)
+        )
+        sub_ps: set[int] = set()
+        sub_for: dict[int, str] = {}
+        for e in absent_periods:
+            k = f"sub_{e['teacher']}_{e['period']}"
+            if st.session_state.get(k, "— Not Assigned —") == t:
+                sub_ps.add(e["period"])
+                sub_for[e["period"]] = e["teacher"]
+
+        period_status: dict[int, str] = {}
+        period_class:  dict[int, str] = {}
+        for p in ALL_PERIODS:
+            if p in master_ps:
+                period_status[p] = "teaching"
+                rows = df[(df["Teacher_Name"]==t) & (df["Day"]==selected_day) & (df["Period"]==p)]
+                period_class[p]  = rows.iloc[0]["Class"] if not rows.empty else ""
+            elif p in sub_ps:
+                period_status[p] = "sub"
+                period_class[p]  = f"Sub for {short_name(sub_for[p])}"
+            else:
+                period_status[p] = "free"
+                period_class[p]  = ""
+
+        free_count = sum(1 for s in period_status.values() if s == "free")
+        teacher_data.append({
+            "name": t, "period_status": period_status, "period_class": period_class,
+            "master_count": len(master_ps), "sub_count": len(sub_ps),
+            "free_count": free_count,
+        })
+
+    teacher_data.sort(key=lambda x: (-x["free_count"], x["name"]))
+
+    n_present  = len(present_teachers)
+    n_absent   = len(absent_teachers)
+    n_free_all = sum(1 for td in teacher_data if td["free_count"] == 8)
+    n_on_sub   = sum(1 for td in teacher_data if td["sub_count"] > 0)
+
+    metrics = [
+        (n_present,  "Present",    "#10B981", "In school today"),
+        (n_absent,   "Absent",     "#EF4444", "Called in / on leave"),
+        (n_free_all, "Fully Free", "#3B82F6", "No classes assigned"),
+        (n_on_sub,   "On Sub",     "#F59E0B", "Covering absent classes"),
+    ]
+
+    tiles_html = "".join(
+        f'<div style="background:#fff;border-radius:14px;padding:.9rem .75rem;'
+        f'text-align:center;box-shadow:0 1px 8px rgba(0,0,0,.05);">'
+        f'<div style="font-size:1.6rem;font-weight:800;color:{col};line-height:1;">{val}</div>'
+        f'<div style="font-size:.68rem;font-weight:700;letter-spacing:.07em;'
+        f'text-transform:uppercase;color:#94A3B8;margin:.25rem 0 .2rem;">{lbl}</div>'
+        f'<div style="font-size:.65rem;color:#CBD5E1;line-height:1.3;">{desc}</div>'
+        f'</div>'
+        for val, lbl, col, desc in metrics
+    )
+    st.markdown(
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));'
+        f'gap:.6rem;margin-bottom:.9rem;">{tiles_html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        '<div style="display:flex;gap:1rem;margin-bottom:.8rem;flex-wrap:wrap;">'
+        '<span><span class="leg-dot" style="background:#3B82F6;"></span>'
+        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Teaching</span></span>'
+        '<span><span class="leg-dot" style="background:#F59E0B;"></span>'
+        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Substituting</span></span>'
+        '<span><span class="leg-dot" style="background:#E2E8F0;"></span>'
+        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Free</span></span>'
+        '</div>',
+        unsafe_allow_html=True)
+
+    if absent_teachers:
+        pills = "".join(
+            f'<span style="display:inline-block;background:#FEF2F2;color:#B91C1C;'
+            f'border:1px solid #FECACA;border-radius:999px;padding:.15rem .55rem;'
+            f'font-size:.68rem;font-weight:600;margin:.1rem;">{short_name(t)}</span>'
+            for t in absent_teachers
+        )
+        st.markdown(
+            f'<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;'
+            f'padding:.6rem .85rem;margin-bottom:.85rem;font-size:.72rem;color:#B91C1C;">'
+            f'🔴 <strong>Absent today:</strong> {pills}</div>',
+            unsafe_allow_html=True)
+
+    if not teacher_data:
+        st.info("All teachers are marked absent.")
+    else:
+        for i in range(0, len(teacher_data), 2):
+            cols = st.columns(2, gap="small")
+            for j, td in enumerate(teacher_data[i:i+2]):
+                with cols[j]:
+                    st.markdown(teacher_status_card(td), unsafe_allow_html=True)
+                    with st.expander("Details", expanded=False):
+                        rows_detail = []
+                        for p in ALL_PERIODS:
+                            s  = td["period_status"][p]
+                            cl = td["period_class"][p]
+                            rows_detail.append({
+                                "Period": p,
+                                "Status": s.title(),
+                                "Class / Note": cl,
+                            })
+                        st.dataframe(pd.DataFrame(rows_detail),
+                                     use_container_width=True, hide_index=True)
+                    st.markdown("<br>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  TAB 1 — Arrangement
@@ -710,6 +830,7 @@ with tab_arr:
             </div>
         """, unsafe_allow_html=True)
 
+        sub_wl = compute_sub_workload()
         for e in t_periods:
             period       = e["period"]
             cls          = e["cls"]
@@ -770,16 +891,16 @@ with tab_arr:
             </div>
             """, unsafe_allow_html=True)
 
-            sub_wl = compute_sub_workload()
             if not club_mode:
                 opts = ["— Not Assigned —"] + sorted(
                     free_teachers,
                     key=lambda t: master_load(df, t, selected_day) + sub_wl.get(t, 0),
                 )
-                # Ensure stored raw name is still a valid option
+                # If stored name is no longer a valid option (e.g. teacher became
+                # absent mid-session), reset and rerun so the widget key is clean
                 if current_sub not in opts:
                     st.session_state[k_sub] = "— Not Assigned —"
-                    current_sub = "— Not Assigned —"
+                    st.rerun()
                 col_sel, col_club = st.columns([3, 1])
                 with col_sel:
                     # key=k_sub stores raw teacher name — format_func renders display label
@@ -909,126 +1030,3 @@ with tab_arr:
         else:
             st.caption("No arrangements saved yet.")
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  TAB 2 — Teacher Status Dashboard
-# ══════════════════════════════════════════════════════════════════════════════
-with tab_status:
-    present_teachers = [t for t in all_teachers if t not in absent_teachers]
-
-    # ── Compute per-teacher status for selected day ───────────────────────────
-    teacher_data: list[dict] = []
-    for t in present_teachers:
-        master_ps: set[int] = set(
-            df[(df["Teacher_Name"]==t) & (df["Day"]==selected_day)]["Period"].astype(int)
-        )
-        # Periods where this teacher has been assigned as substitute today
-        sub_ps: set[int] = set()
-        sub_for: dict[int, str] = {}     # period → absent teacher name
-        for e in absent_periods:
-            k = f"sub_{e['teacher']}_{e['period']}"
-            if st.session_state.get(k, "— Not Assigned —") == t:
-                sub_ps.add(e["period"])
-                sub_for[e["period"]] = e["teacher"]
-
-        period_status: dict[int, str] = {}
-        period_class:  dict[int, str] = {}
-        for p in ALL_PERIODS:
-            if p in master_ps:
-                period_status[p] = "teaching"
-                rows = df[(df["Teacher_Name"]==t) & (df["Day"]==selected_day) & (df["Period"]==p)]
-                period_class[p]  = rows.iloc[0]["Class"] if not rows.empty else ""
-            elif p in sub_ps:
-                period_status[p] = "sub"
-                period_class[p]  = f"Sub for {short_name(sub_for[p])}"
-            else:
-                period_status[p] = "free"
-                period_class[p]  = ""
-
-        free_count = sum(1 for s in period_status.values() if s == "free")
-        teacher_data.append({
-            "name": t, "period_status": period_status, "period_class": period_class,
-            "master_count": len(master_ps), "sub_count": len(sub_ps),
-            "free_count": free_count,
-        })
-
-    # Sort: most free periods first
-    teacher_data.sort(key=lambda x: (-x["free_count"], x["name"]))
-
-    # ── Summary stat tiles ────────────────────────────────────────────────────
-    n_present  = len(present_teachers)
-    n_absent   = len(absent_teachers)
-    n_free_all = sum(1 for td in teacher_data if td["free_count"] == 8)
-    n_on_sub   = sum(1 for td in teacher_data if td["sub_count"] > 0)
-
-    metrics = [
-        (n_present,  "Present",    "#10B981", "In school today"),
-        (n_absent,   "Absent",     "#EF4444", "Called in / on leave"),
-        (n_free_all, "Fully Free", "#3B82F6", "No classes assigned"),
-        (n_on_sub,   "On Sub",     "#F59E0B", "Covering absent classes"),
-    ]
-
-    tiles_html = "".join(
-        f'<div style="background:#fff;border-radius:14px;padding:.9rem .75rem;'
-        f'text-align:center;box-shadow:0 1px 8px rgba(0,0,0,.05);">'
-        f'<div style="font-size:1.6rem;font-weight:800;color:{col};line-height:1;">{val}</div>'
-        f'<div style="font-size:.68rem;font-weight:700;letter-spacing:.07em;'
-        f'text-transform:uppercase;color:#94A3B8;margin:.25rem 0 .2rem;">{lbl}</div>'
-        f'<div style="font-size:.65rem;color:#CBD5E1;line-height:1.3;">{desc}</div>'
-        f'</div>'
-        for val, lbl, col, desc in metrics
-    )
-    st.markdown(
-        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));'
-        f'gap:.6rem;margin-bottom:.9rem;">{tiles_html}</div>',
-        unsafe_allow_html=True,
-    )
-
-    # ── Legend ────────────────────────────────────────────────────────────────
-    st.markdown(
-        '<div style="display:flex;gap:1rem;margin-bottom:.8rem;flex-wrap:wrap;">'
-        '<span><span class="leg-dot" style="background:#3B82F6;"></span>'
-        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Teaching</span></span>'
-        '<span><span class="leg-dot" style="background:#F59E0B;"></span>'
-        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Substituting</span></span>'
-        '<span><span class="leg-dot" style="background:#E2E8F0;"></span>'
-        '<span style="font-size:.72rem;color:#475569;font-weight:500;">Free</span></span>'
-        '</div>',
-        unsafe_allow_html=True)
-
-    # ── Absent teachers (collapsed) ───────────────────────────────────────────
-    if absent_teachers:
-        pills = "".join(
-            f'<span style="display:inline-block;background:#FEF2F2;color:#B91C1C;'
-            f'border:1px solid #FECACA;border-radius:999px;padding:.15rem .55rem;'
-            f'font-size:.68rem;font-weight:600;margin:.1rem;">{short_name(t)}</span>'
-            for t in absent_teachers
-        )
-        st.markdown(
-            f'<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:12px;'
-            f'padding:.6rem .85rem;margin-bottom:.85rem;font-size:.72rem;color:#B91C1C;">'
-            f'🔴 <strong>Absent today:</strong> {pills}</div>',
-            unsafe_allow_html=True)
-
-    # ── Teacher grid (2 columns) ──────────────────────────────────────────────
-    if not teacher_data:
-        st.info("All teachers are marked absent.")
-    else:
-        for i in range(0, len(teacher_data), 2):
-            cols = st.columns(2, gap="small")
-            for j, td in enumerate(teacher_data[i:i+2]):
-                with cols[j]:
-                    st.markdown(teacher_status_card(td), unsafe_allow_html=True)
-                    # Period detail on hover via expander
-                    with st.expander("Details", expanded=False):
-                        rows_detail = []
-                        for p in ALL_PERIODS:
-                            s  = td["period_status"][p]
-                            cl = td["period_class"][p]
-                            rows_detail.append({
-                                "Period": p,
-                                "Status": s.title(),
-                                "Class / Note": cl,
-                            })
-                        st.dataframe(pd.DataFrame(rows_detail),
-                                     use_container_width=True, hide_index=True)
-                    st.markdown("<br>", unsafe_allow_html=True)

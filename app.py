@@ -3,7 +3,7 @@ KV Burhanpur — Teacher Arrangement / Substitution App
 Run: python3 -m streamlit run app.py --browser.gatherUsageStats=false
 """
 
-import datetime, os, hashlib
+import base64, datetime, os, hashlib
 import pandas as pd
 import streamlit as st
 
@@ -143,20 +143,52 @@ def generate_arrangement_pdf(report_df: pd.DataFrame, selected_day: str, date_va
 
     elems = []
 
-    # ── logo + header ─────────────────────────────────────────────────────────
+    # ── header: KV logo (left) | school name (centre) | PM SHRI logo (right) ──
     from reportlab.platypus import Image as RLImage
-    LOGO_PATH = os.path.join(os.getcwd(), "2025021137.png")
-    if os.path.exists(LOGO_PATH):
-        logo = RLImage(LOGO_PATH, width=3.8*cm, height=1.6*cm)
-        logo.hAlign = "CENTER"
-        elems.append(logo)
-        elems.append(Spacer(1, 0.2*cm))
-    elems.append(Paragraph("PM SHRI KENDRIYA VIDYALAYA BURHANPUR", sty_school))
-    elems.append(Paragraph("DAILY TEACHER ARRANGEMENT", sty_title))
-    elems.append(Paragraph(f"{selected_day}  ·  {date_val}  ·  Academic Year 2026-27", sty_meta))
-    elems.append(Spacer(1, 0.2*cm))
-    elems.append(HRFlowable(width="100%", thickness=1.5, color=BLUE, spaceAfter=0.25*cm))
+
+    KV_LOGO   = os.path.join(os.getcwd(), "2023042075.png")
+    PMSHRI_LOGO = os.path.join(os.getcwd(), "2025021137.png")
+
+    # A4 usable width = 21cm − 1.5cm×2 margins = 18cm exactly
+    KV_W, KV_H       = 1.8*cm, 1.8*cm
+    PM_W, PM_H       = 3.2*cm, 1.3*cm
+    CENTRE_W          = 18*cm - KV_W - PM_W   # = 13.0 cm
+
+    kv_cell     = RLImage(KV_LOGO,     width=KV_W, height=KV_H)   if os.path.exists(KV_LOGO)     else Paragraph("", sty_meta)
+    pmshri_cell = RLImage(PMSHRI_LOGO, width=PM_W, height=PM_H)   if os.path.exists(PMSHRI_LOGO) else Paragraph("", sty_meta)
+
+    sty_centre = ParagraphStyle("hc", fontName="Helvetica-Bold", fontSize=10,
+                                 alignment=TA_CENTER, textColor=BLUE, leading=14, spaceAfter=1)
+    sty_sub_c  = ParagraphStyle("sc", fontName="Helvetica-Bold", fontSize=8,
+                                 alignment=TA_CENTER, textColor=DARK, leading=10, spaceAfter=1)
+    sty_meta_c = ParagraphStyle("mc", fontName="Helvetica", fontSize=7,
+                                 alignment=TA_CENTER, textColor=MID)
+
+    centre_cell = [
+        Paragraph("PM SHRI KENDRIYA VIDYALAYA BURHANPUR", sty_centre),
+        Paragraph("DAILY TEACHER ARRANGEMENT", sty_sub_c),
+        Paragraph(f"{selected_day}  ·  {date_val}  ·  Academic Year 2026-27", sty_meta_c),
+    ]
+
+    hdr_tbl = Table(
+        [[kv_cell, centre_cell, pmshri_cell]],
+        colWidths=[KV_W, CENTRE_W, PM_W],
+    )
+    hdr_tbl.setStyle(TableStyle([
+        ("ALIGN",        (0,0), (0,0),   "LEFT"),
+        ("ALIGN",        (1,0), (1,0),   "CENTER"),
+        ("ALIGN",        (2,0), (2,0),   "RIGHT"),
+        ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
+        ("LEFTPADDING",  (0,0), (-1,-1), 0),
+        ("RIGHTPADDING", (0,0), (-1,-1), 0),
+        ("TOPPADDING",   (0,0), (-1,-1), 0),
+        ("BOTTOMPADDING",(0,0), (-1,-1), 2),
+    ]))
+
+    elems.append(hdr_tbl)
     elems.append(Spacer(1, 0.15*cm))
+    elems.append(HRFlowable(width="100%", thickness=1.5, color=BLUE, spaceAfter=0.2*cm))
+    elems.append(Spacer(1, 0.1*cm))
 
     # ── table ────────────────────────────────────────────────────────────────
     # Sort: absent teacher → period
@@ -346,9 +378,12 @@ html,body,[class*="css"]{ font-family:'Inter',sans-serif !important; }
 .kv-header{
     background:linear-gradient(135deg,#1E3A8A 0%,#2563EB 60%,#3B82F6 100%);
     border-radius:20px; padding:1.6rem 1.5rem 1.4rem;
-    color:#fff; text-align:center; margin-bottom:1rem;
+    color:#fff; margin-bottom:1rem;
     box-shadow:0 4px 24px rgba(37,99,235,.3);
+    display:flex; align-items:center; justify-content:space-between; gap:.8rem;
 }
+.kv-header-logo{ height:52px; width:auto; flex-shrink:0; object-fit:contain; filter:drop-shadow(0 1px 3px rgba(0,0,0,.25)); }
+.kv-header-centre{ text-align:center; flex:1; }
 .kv-header h1{ font-size:1.35rem; font-weight:800; margin:0 0 .2rem; letter-spacing:-.4px; }
 .kv-header p{ font-size:.75rem; opacity:.75; margin:0; }
 
@@ -448,10 +483,49 @@ div[data-testid="stTabs"] > div:first-child button p{
     color:inherit !important; font-size:.82rem !important; font-weight:600 !important; }
 
 @media(max-width:600px){
-    .block-container{ padding:.9rem .6rem 4rem !important; }
-    .kv-header{ padding:1.2rem 1rem 1rem; border-radius:16px; }
-    .kv-header h1{ font-size:1.1rem; }
-    .period-row{ padding:.5rem .8rem; gap:.4rem; }
+    .block-container{ padding:.75rem .5rem 4rem !important; }
+
+    /* Header — keep flex row but shrink everything */
+    .kv-header{ padding:1rem .85rem .9rem; border-radius:14px; gap:.45rem; }
+    .kv-header-logo{ height:36px; }
+    .kv-header h1{ font-size:.95rem; letter-spacing:-.3px; }
+    .kv-header p{ font-size:.65rem; }
+
+    /* Cards */
+    .card{ padding:.85rem .9rem; border-radius:13px; }
+    .absent-card-head{ padding:.75rem .85rem .7rem; gap:.55rem; }
+    .teacher-av{ width:38px; height:38px; font-size:.82rem; }
+    .teacher-name{ font-size:.88rem; }
+    .teacher-meta{ font-size:.65rem; }
+
+    /* Period rows — bigger tap target */
+    .period-row{ padding:.55rem .85rem; gap:.4rem; min-height:44px; }
+    .pnum{ min-width:28px; height:28px; font-size:.7rem; }
+    .pclass{ font-size:.78rem; }
+
+    /* Stat tiles — wrap to 2-col grid handled in HTML; just shrink text */
+    .stat-num{ font-size:1.3rem; }
+    .stat-lbl{ font-size:.6rem; }
+
+    /* Selectbox / multiselect full width on mobile */
+    div[data-testid="stSelectbox"],
+    div[data-testid="stMultiSelect"]{  width:100% !important; }
+
+    /* Buttons full-width and tall enough to tap */
+    div[data-testid="stButton"] > button,
+    div[data-testid="stDownloadButton"] > button{
+        width:100% !important; min-height:44px !important; font-size:.82rem !important; }
+
+    /* Tabs strip — smaller font so labels don't wrap */
+    div[data-testid="stTabs"] > div:first-child button{
+        font-size:.75rem !important; padding:.45rem .7rem !important; }
+}
+
+/* Extra-small phones (≤ 375 px) */
+@media(max-width:375px){
+    .kv-header-logo{ height:30px; }
+    .kv-header h1{ font-size:.85rem; }
+    .kv-header p{ display:none; }   /* hide subtitle — too cramped */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -469,10 +543,27 @@ all_teachers = sorted(df["Teacher_Name"].unique())
 # ─────────────────────────────────────────────────────────────────────────────
 # Header
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+def _b64_img(filename: str) -> str:
+    path = os.path.join(os.getcwd(), filename)
+    try:
+        return base64.b64encode(open(path, "rb").read()).decode()
+    except FileNotFoundError:
+        return ""
+
+_kv_b64 = _b64_img("2023042075.png")
+_pm_b64 = _b64_img("2025021137.png")
+
+_kv_tag = f'<img src="data:image/png;base64,{_kv_b64}" class="kv-header-logo">' if _kv_b64 else ""
+_pm_tag = f'<img src="data:image/png;base64,{_pm_b64}" class="kv-header-logo">' if _pm_b64 else ""
+
+st.markdown(f"""
 <div class="kv-header">
-    <h1>🏫 KV Burhanpur</h1>
-    <p>Teacher Arrangement &amp; Substitution · Academic Year 2026-27</p>
+    {_kv_tag}
+    <div class="kv-header-centre">
+        <h1>🏫 KV Burhanpur</h1>
+        <p>Teacher Arrangement &amp; Substitution · Academic Year 2026-27</p>
+    </div>
+    {_pm_tag}
 </div>
 """, unsafe_allow_html=True)
 
@@ -882,7 +973,7 @@ with tab_status:
         for val, lbl, col, desc in metrics
     )
     st.markdown(
-        f'<div style="display:grid;grid-template-columns:repeat(4,1fr);'
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));'
         f'gap:.6rem;margin-bottom:.9rem;">{tiles_html}</div>',
         unsafe_allow_html=True,
     )
